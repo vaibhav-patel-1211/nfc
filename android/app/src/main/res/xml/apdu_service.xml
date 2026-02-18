@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Declares the AID (Application Identifier) this HCE service responds to.
+  AID F0010203040506 is in the proprietary range (0xF0 prefix) — safe for
+  custom use without GSMA registration.
+  category="other" means this is not a payment application.
+-->
+<host-apdu-service
+  xmlns:android="http://schemas.android.com/apk/res/android"
+  android:description="@string/hce_service_description"
+  android:requireDeviceUnlock="false">
+  <aid-group
+    android:description="@string/hce_service_description"
+    android:category="other">
+    <aid-filter android:name="F0010203040506" />
+  </aid-group>
+</host-apdu-service>

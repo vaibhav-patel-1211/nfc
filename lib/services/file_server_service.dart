@@ -14,13 +14,24 @@ class FileServerService {
 
     // Create a handler that serves the specific file
     final handler = (shelf.Request request) {
+      final fileName = file.path.split('/').last;
+      String mimeType = 'application/octet-stream';
+
+      final currentExtension = fileName.split('.').last.toLowerCase();
+      if (['jpg', 'jpeg', 'png', 'webp', 'gif'].contains(currentExtension)) {
+        mimeType = 'image/$currentExtension';
+      } else if (['mp4', 'mov', 'avi', 'mkv'].contains(currentExtension)) {
+        mimeType = 'video/$currentExtension';
+        if (currentExtension == 'mov') mimeType = 'video/quicktime';
+        if (currentExtension == 'mkv') mimeType = 'video/x-matroska';
+      }
+
       return shelf.Response.ok(
         file.openRead(),
         headers: {
-          'Content-Type': 'application/octet-stream',
+          'Content-Type': mimeType,
           'Content-Length': file.lengthSync().toString(),
-          'Content-Disposition':
-              'attachment; filename="${file.path.split('/').last}"',
+          'Content-Disposition': 'attachment; filename="$fileName"',
         },
       );
     };

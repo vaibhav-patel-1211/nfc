@@ -12,6 +12,7 @@ import 'package:open_file/open_file.dart';
 import '../providers/nfc_provider.dart';
 
 import '../models/nfc_data.dart';
+import '../utils/video_player_widget.dart';
 
 class ReadScreen extends StatefulWidget {
   const ReadScreen({super.key});
@@ -80,20 +81,10 @@ class _ReadScreenState extends State<ReadScreen> {
 
   Widget _buildContentDisplay(BuildContext context, NfcData data) {
     if (data.type == NfcDataType.mime) {
-      // Check if it's an image based on mimeType
-      if (data.mimeType != null && data.mimeType!.startsWith('image/')) {
-        // Should we try to show image from URL if content is URL?
-        // Or is content base64?
-        // The current implementation of MimeRecord in service returns:
-        // content = String from body (likely URL or base64?)
-        // Wait, the previous logic assumed content was a URL.
-        // If it's a real NFC tag with a file, it might just be the file data inline?
-        // Or a URI record pointing to a file?
+      final mimeType = data.mimeType?.toLowerCase() ?? '';
 
-        // If the mime record is a URL (common for "smart posters"), treat as URL.
-        // But here we likely have raw data if it's a true MimeRecord.
-        // Let's assume for now if it looks like a URL, we show it as image/file download.
-
+      // 1. Handle Images
+      if (mimeType.startsWith('image/')) {
         if (data.content.startsWith('http')) {
           return Column(
             children: [
@@ -144,7 +135,28 @@ class _ReadScreenState extends State<ReadScreen> {
         }
       }
 
-      // Generic File or non-image MIME
+      // 2. Handle Videos
+      if (mimeType.startsWith('video/') && data.content.startsWith('http')) {
+        return Column(
+          children: [
+            Text('Video Detected',
+                style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 16),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: VideoPlayerWidget(videoUrl: data.content),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: () => _downloadAndOpenFile(data.content, context),
+              icon: const Icon(Icons.download),
+              label: const Text('Download Video'),
+            ),
+          ],
+        );
+      }
+
+      // 3. Generic File or other MIME
       final fileName = data.content.startsWith('http')
           ? data.content.split('/').last
           : 'Data';

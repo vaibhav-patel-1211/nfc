@@ -52,38 +52,52 @@ class HceService : HostApduService() {
         // --- NDEF GENERATION ---
         private fun updateCachedNdefMessage() {
             try {
-                var text = broadcastText
+                val text = broadcastText
                 val isUri = text.startsWith("http://") || text.startsWith("https://")
 
-                if (!isUri) {
-                    text = "https://www.google.com/search?q=" + URLEncoder.encode(text, "UTF-8")
-                }
+                val ndefRecord: ByteArray
+                val type: Byte
 
-                // Always create a URI Record ('U')
-                val type = 0x55.toByte() // 'U'
-                val uriPrefixCode: Byte
-                val uriBody: String
+                if (isUri) {
+                    type = 0x55.toByte() // 'U'
+                    val uriPrefixCode: Byte
+                    val uriBody: String
 
-                if (text.startsWith("https://www.")) {
-                    uriPrefixCode = 0x02.toByte()
-                    uriBody = text.substring(12)
-                } else if (text.startsWith("http://www.")) {
-                    uriPrefixCode = 0x01.toByte()
-                    uriBody = text.substring(11)
-                } else if (text.startsWith("https://")) {
-                    uriPrefixCode = 0x04.toByte()
-                    uriBody = text.substring(8)
+                    if (text.startsWith("https://www.")) {
+                        uriPrefixCode = 0x02.toByte()
+                        uriBody = text.substring(12)
+                    } else if (text.startsWith("http://www.")) {
+                        uriPrefixCode = 0x01.toByte()
+                        uriBody = text.substring(11)
+                    } else if (text.startsWith("https://")) {
+                        uriPrefixCode = 0x04.toByte()
+                        uriBody = text.substring(8)
+                    } else {
+                        uriPrefixCode = 0x03.toByte()
+                        uriBody = text.substring(7)
+                    }
+
+                    val uriBytes = uriBody.toByteArray(Charsets.UTF_8)
+                    val payload = ByteArray(1 + uriBytes.size)
+                    payload[0] = uriPrefixCode
+                    System.arraycopy(uriBytes, 0, payload, 1, uriBytes.size)
+                    ndefRecord = payload
                 } else {
-                    uriPrefixCode = 0x03.toByte()
-                    uriBody = text.substring(7)
+                    // Text Record
+                    type = 0x54.toByte() // 'T'
+                    val lang = "en".toByteArray(Charsets.US_ASCII)
+                    val textBytes = text.toByteArray(Charsets.UTF_8)
+                    val langLen = lang.size
+                    val statusByte = (langLen and 0x3F).toByte() // UTF-8, len=2
+
+                    val payload = ByteArray(1 + langLen + textBytes.size)
+                    payload[0] = statusByte
+                    System.arraycopy(lang, 0, payload, 1, langLen)
+                    System.arraycopy(textBytes, 0, payload, 1 + langLen, textBytes.size)
+                    ndefRecord = payload
                 }
 
-                val uriBytes = uriBody.toByteArray(Charsets.UTF_8)
-                val payload = ByteArray(1 + uriBytes.size)
-                payload[0] = uriPrefixCode
-                System.arraycopy(uriBytes, 0, payload, 1, uriBytes.size)
-
-                val payloadLen = payload.size
+                val payloadLen = ndefRecord.size
                 val isShortRecord = payloadLen <= 255
 
                 // Header: MB=1, ME=1, CF=0, SR=?, IL=0, TNF=01
@@ -91,14 +105,14 @@ class HceService : HostApduService() {
 
                 // Record Overhead: Header(1) + TypeLen(1) + PayloadLen(1 or 4) + Type(1)
                 val recordOverhead = 1 + 1 + (if (isShortRecord) 1 else 4) + 1
-                val ndefRecordLen = recordOverhead + payloadLen
+                val totalLen = recordOverhead + payloadLen
 
                 // NDEF File: [Length (2 bytes)] + [NDEF Message]
-                val fileContent = ByteArray(2 + ndefRecordLen)
+                val fileContent = ByteArray(2 + totalLen)
 
                 // File Length
-                fileContent[0] = ((ndefRecordLen shr 8) and 0xFF).toByte()
-                fileContent[1] = (ndefRecordLen and 0xFF).toByte()
+                fileContent[0] = ((totalLen shr 8) and 0xFF).toByte()
+                fileContent[1] = (totalLen and 0xFF).toByte()
 
                 var idx = 2
                 fileContent[idx++] = headerByte.toByte()
@@ -115,11 +129,12 @@ class HceService : HostApduService() {
 
                 fileContent[idx++] = type // 'T' or 'U'
 
-                System.arraycopy(payload, 0, fileContent, idx, payloadLen)
+                System.arraycopy(ndefRecord, 0, fileContent, idx, payloadLen)
 
                 cachedNdefMessage = fileContent
 
             } catch (e: Exception) {
+                // Log error or handle silently
             }
         }
     }

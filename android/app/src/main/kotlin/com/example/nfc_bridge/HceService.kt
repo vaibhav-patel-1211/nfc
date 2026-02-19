@@ -2,58 +2,226 @@ package com.example.nfc_bridge
 
 import android.nfc.cardemulation.HostApduService
 import android.os.Bundle
-import android.util.Log
+
+import java.util.Arrays
+import java.net.URLEncoder
 
 class HceService : HostApduService() {
     companion object {
         const val TAG = "HceService"
+
+        // --- CONSTANTS ---
+        private val APDU_SELECT_AID = hexStringToByteArray("00A4040007D276000085010100")
+        private val CC_FILE_ID = hexStringToByteArray("E103")
+        private val NDEF_FILE_ID = hexStringToByteArray("E104")
+
+        // Status Words
+        private val SW_SUCCESS = hexStringToByteArray("9000")
+        private val SW_FILE_NOT_FOUND = hexStringToByteArray("6A82")
+        private val SW_INS_NOT_SUPPORTED = hexStringToByteArray("6D00")
+        private val SW_CLA_NOT_SUPPORTED = hexStringToByteArray("6E00")
+        private val SW_WRONG_P1P2 = hexStringToByteArray("6B00")
+        private val SW_WRONG_LENGTH = hexStringToByteArray("6700")
+
+        // Capability Container (CC) File
+        // MLe (Max R-APDU size): 00FF (255 bytes)
+        // Max NDEF Size: 0400 (1024 bytes) - Reduced from FFFE to support old devices
+        private val CC_FILE = hexStringToByteArray("000F2000FF00FF0406E10404000000")
+
         var broadcastText: String = "Hello from Android NFC Bridge"
+            set(value) {
+                field = value
+                updateCachedNdefMessage()
+            }
+
+        private var cachedNdefMessage: ByteArray = ByteArray(0)
+
+        init {
+             updateCachedNdefMessage()
+        }
+
+        private fun hexStringToByteArray(s: String): ByteArray {
+            val len = s.length
+            val data = ByteArray(len / 2)
+            for (i in 0 until len step 2) {
+                data[i / 2] = ((Character.digit(s[i], 16) shl 4) + Character.digit(s[i + 1], 16)).toByte()
+            }
+            return data
+        }
+
+        // --- NDEF GENERATION ---
+        private fun updateCachedNdefMessage() {
+            try {
+                var text = broadcastText
+                val isUri = text.startsWith("http://") || text.startsWith("https://")
+
+                if (!isUri) {
+                    text = "https://www.google.com/search?q=" + URLEncoder.encode(text, "UTF-8")
+                }
+
+                // Always create a URI Record ('U')
+                val type = 0x55.toByte() // 'U'
+                val uriPrefixCode: Byte
+                val uriBody: String
+
+                if (text.startsWith("https://www.")) {
+                    uriPrefixCode = 0x02.toByte()
+                    uriBody = text.substring(12)
+                } else if (text.startsWith("http://www.")) {
+                    uriPrefixCode = 0x01.toByte()
+                    uriBody = text.substring(11)
+                } else if (text.startsWith("https://")) {
+                    uriPrefixCode = 0x04.toByte()
+                    uriBody = text.substring(8)
+                } else {
+                    uriPrefixCode = 0x03.toByte()
+                    uriBody = text.substring(7)
+                }
+
+                val uriBytes = uriBody.toByteArray(Charsets.UTF_8)
+                val payload = ByteArray(1 + uriBytes.size)
+                payload[0] = uriPrefixCode
+                System.arraycopy(uriBytes, 0, payload, 1, uriBytes.size)
+
+                val payloadLen = payload.size
+                val isShortRecord = payloadLen <= 255
+
+                // Header: MB=1, ME=1, CF=0, SR=?, IL=0, TNF=01
+                val headerByte = if (isShortRecord) 0xD1 else 0xC1
+
+                // Record Overhead: Header(1) + TypeLen(1) + PayloadLen(1 or 4) + Type(1)
+                val recordOverhead = 1 + 1 + (if (isShortRecord) 1 else 4) + 1
+                val ndefRecordLen = recordOverhead + payloadLen
+
+                // NDEF File: [Length (2 bytes)] + [NDEF Message]
+                val fileContent = ByteArray(2 + ndefRecordLen)
+
+                // File Length
+                fileContent[0] = ((ndefRecordLen shr 8) and 0xFF).toByte()
+                fileContent[1] = (ndefRecordLen and 0xFF).toByte()
+
+                var idx = 2
+                fileContent[idx++] = headerByte.toByte()
+                fileContent[idx++] = 0x01.toByte() // Type Length
+
+                if (isShortRecord) {
+                    fileContent[idx++] = payloadLen.toByte()
+                } else {
+                    fileContent[idx++] = ((payloadLen shr 24) and 0xFF).toByte()
+                    fileContent[idx++] = ((payloadLen shr 16) and 0xFF).toByte()
+                    fileContent[idx++] = ((payloadLen shr 8) and 0xFF).toByte()
+                    fileContent[idx++] = (payloadLen and 0xFF).toByte()
+                }
+
+                fileContent[idx++] = type // 'T' or 'U'
+
+                System.arraycopy(payload, 0, fileContent, idx, payloadLen)
+
+                cachedNdefMessage = fileContent
+
+            } catch (e: Exception) {
+            }
+        }
     }
 
+    // --- STATE MACHINE ---
+    private var selectedFile: ByteArray? = null
+
     override fun processCommandApdu(commandApdu: ByteArray, extras: Bundle?): ByteArray {
-        Log.d(TAG, "Processing APDU command")
+        if (commandApdu.size < 4) return SW_INS_NOT_SUPPORTED
 
-        // Calculate dynamic lengths
-        val langCodeLength = 2 // 'en' language code
-        val textBytes = broadcastText.toByteArray(Charsets.UTF_8)
-        val payloadLength = 1 + langCodeLength + textBytes.size // status byte + lang code + text
-        val ndefMessageLength = 1 + 1 + 1 + 1 + payloadLength // header flags + type length + payload length + type + payload
+        val cla = commandApdu[0]
+        val ins = commandApdu[1]
+        val p1 = commandApdu[2]
+        val p2 = commandApdu[3]
 
-        // Build the NDEF response
-        val response = ByteArray(ndefMessageLength + 3) // +3 for TLV tag, length, and terminator
+        if (cla != 0x00.toByte()) return SW_CLA_NOT_SUPPORTED
 
-        // NDEF Message wrapper
-        response[0] = 0x03.toByte() // NDEF message TLV tag
-        response[1] = ndefMessageLength.toByte() // length of the NDEF message
+        if (ins == 0xA4.toByte()) {
+            return handleSelect(commandApdu, p1, p2)
+        }
 
-        // NDEF Record header
-        response[2] = 0xD1.toByte() // Record header flags (MB=1, ME=1, CF=0, SR=1, IL=0, TNF=001)
-        response[3] = 0x01.toByte() // Type length = 0x01 (one byte type field)
-        response[4] = payloadLength.toByte() // Payload length
-        response[5] = 0x54.toByte() // Type = 0x54 (ASCII 'T' — NDEF Text Record type)
+        if (ins == 0xB0.toByte()) {
+            return handleReadBinary(commandApdu, p1, p2)
+        }
 
-        // Text Record payload
-        response[6] = 0x02.toByte() // Status byte (Bit 7 = 0 (UTF-8 encoding), Bits 5-0 = 0x02 (language code length = 2))
-        response[7] = 0x65.toByte() // Language code 'e' (0x65)
-        response[8] = 0x6E.toByte() // Language code 'n' (0x6E)
+        return SW_INS_NOT_SUPPORTED
+    }
 
-        // Copy the broadcast text
-        System.arraycopy(textBytes, 0, response, 9, textBytes.size)
+    private fun handleSelect(apdu: ByteArray, p1: Byte, p2: Byte): ByteArray {
+        // SELECT by AID (P1=04, P2=00)
+        if (p1 == 0x04.toByte() && p2 == 0x00.toByte()) {
+            if (apdu.size >= 5 + 7) {
+                 selectedFile = null
+                 return SW_SUCCESS
+            }
+        }
 
-        // Terminator TLV
-        response[9 + textBytes.size] = 0xFE.toByte() // Terminator TLV
+        // SELECT by File ID (P1=00)
+        // Standard says P2=0x0C (First or only occurrence), but we accept 0x00 to be safe.
+        if (p1 == 0x00.toByte() && (p2 == 0x0C.toByte() || p2 == 0x00.toByte())) {
+             if (apdu.size < 7) return SW_WRONG_LENGTH
+             val fileId = Arrays.copyOfRange(apdu, 5, 7)
 
-        // APDU success trailer
-        val finalResponse = ByteArray(response.size + 2)
-        System.arraycopy(response, 0, finalResponse, 0, response.size)
-        finalResponse[finalResponse.size - 2] = 0x90.toByte() // Success status word SW1
-        finalResponse[finalResponse.size - 1] = 0x00.toByte() // Success status word SW2
+             if (Arrays.equals(fileId, CC_FILE_ID)) {
+                 selectedFile = CC_FILE_ID
+                 return SW_SUCCESS
+             }
+             if (Arrays.equals(fileId, NDEF_FILE_ID)) {
+                 selectedFile = NDEF_FILE_ID
+                 return SW_SUCCESS
+             }
+             return SW_FILE_NOT_FOUND
+        }
 
-        Log.d(TAG, "Sending NDEF response: ${finalResponse.contentToString()}")
-        return finalResponse
+        return SW_WRONG_P1P2
+    }
+
+    private fun handleReadBinary(apdu: ByteArray, p1: Byte, p2: Byte): ByteArray {
+        if (selectedFile == null) return SW_INS_NOT_SUPPORTED
+
+        val offset = ((p1.toInt() and 0xFF) shl 8) or (p2.toInt() and 0xFF)
+
+        var le = 0
+        if (apdu.size >= 5) {
+             le = apdu[4].toInt() and 0xFF
+        }
+
+        val data = if (Arrays.equals(selectedFile, CC_FILE_ID)) CC_FILE else cachedNdefMessage
+
+        // Strict boundary check
+        if (offset < 0 || offset >= data.size) {
+            return SW_WRONG_P1P2
+        }
+
+        var lenToRead = le
+        if (lenToRead == 0) {
+            lenToRead = data.size - offset
+            if (lenToRead > 255) lenToRead = 255 // MLe cap
+        }
+
+        lenToRead = Math.min(lenToRead, data.size - offset)
+
+        val response = ByteArray(lenToRead + 2)
+        System.arraycopy(data, offset, response, 0, lenToRead)
+
+        // Append Status Words (90 00)
+        response[lenToRead] = 0x90.toByte()
+        response[lenToRead + 1] = 0x00.toByte()
+
+        if (offset == 0 && Arrays.equals(selectedFile, NDEF_FILE_ID)) {
+             val v = getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator?
+             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                 v?.vibrate(android.os.VibrationEffect.createOneShot(50, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+             } else {
+                 v?.vibrate(50)
+             }
+        }
+
+        return response
     }
 
     override fun onDeactivated(reason: Int) {
-        Log.d(TAG, "HCE service deactivated, reason: $reason")
+        selectedFile = null
     }
 }

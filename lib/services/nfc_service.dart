@@ -16,7 +16,8 @@ class NfcService {
   Future<String> readTag() async {
     try {
       // Start NFC session
-      await FlutterNfcKit.poll();
+      await FlutterNfcKit.poll(
+          iosAlertMessage: "Hold your iPhone near the NFC tag");
 
       // Read NDEF records
       final records = await FlutterNfcKit.readNDEFRecords();

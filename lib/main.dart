@@ -8,6 +8,8 @@ import 'app.dart';
 import 'providers/nfc_provider.dart';
 
 void main() {
+  // Initialize the app with a MultiProvider to manage state globally.
+  // We use ChangeNotifierProvider for handling NFC state changes.
   runApp(
     MultiProvider(
       providers: [

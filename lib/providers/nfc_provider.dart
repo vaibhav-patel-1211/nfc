@@ -10,12 +10,13 @@ import 'package:permission_handler/permission_handler.dart';
 import '../services/nfc_service.dart';
 import '../services/file_server_service.dart';
 import '../models/app_mode.dart';
+import '../models/nfc_data.dart';
 
 class NfcProvider extends ChangeNotifier {
   final NfcService _nfcService = NfcService();
   final FileServerService _fileServer = FileServerService();
 
-  String? lastRead; // last successfully read tag text
+  NfcData? lastRead; // last successfully read tag data
   String? errorMessage; // last error, null when no error
   bool isReading = false; // true while a scan is in progress
   bool isBroadcasting = false; // true while HCE is active
@@ -50,7 +51,8 @@ class NfcProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Starts reading an NFC tag
+  /// Starts reading an NFC tag.
+  /// Used by iOS (natively) and Android (foreground dispatch).
   Future<void> startRead() async {
     // Prevent double tap
     if (isReading) return;
@@ -69,7 +71,7 @@ class NfcProvider extends ChangeNotifier {
     }
   }
 
-  /// Toggles broadcast state
+  /// Toggles broadcast state (Android only).
   Future<void> toggleBroadcast() async {
     if (isBroadcasting) {
       await stopBroadcast();
@@ -78,7 +80,8 @@ class NfcProvider extends ChangeNotifier {
     }
   }
 
-  /// Starts HCE broadcast
+  /// Starts HCE broadcast (Android only).
+  /// Sets up the platform channel to respond to APDU commands.
   Future<void> startBroadcast() async {
     errorMessage = null;
     notifyListeners();
@@ -94,7 +97,7 @@ class NfcProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Stops HCE broadcast
+  /// Stops HCE broadcast (Android only).
   Future<void> stopBroadcast() async {
     try {
       await _nfcService.stopHceBroadcast();
@@ -106,7 +109,8 @@ class NfcProvider extends ChangeNotifier {
     }
   }
 
-  /// Picking a file and starting the server
+  /// Picking a file and starting the server.
+  /// Launches a file picker, starts a local HTTP server, and updates the broadcast text to the file's URL.
   Future<void> pickFile() async {
     try {
       // Request location permission (required for IP address on Android 12+)

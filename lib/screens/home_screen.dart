@@ -25,7 +25,7 @@ class HomeScreen extends StatelessWidget {
           if (isAndroid) {
             return Column(
               children: [
-                // Mode toggle for Android
+                // Mode toggle for Android: Allows switching between Read and Broadcast modes.
                 Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: SegmentedButton<AppMode>(
@@ -49,7 +49,7 @@ class HomeScreen extends StatelessWidget {
                     },
                   ),
                 ),
-                // Show appropriate screen based on mode
+                // Show appropriate screen based on selected mode.
                 Expanded(
                   child: provider.mode == AppMode.read
                       ? const ReadScreen()
@@ -58,7 +58,8 @@ class HomeScreen extends StatelessWidget {
               ],
             );
           } else {
-            // iOS only supports read mode
+            // iOS only supports read mode, so we directly show the ReadScreen.
+            // Broadcasting via HCE is not available on iOS.
             return const ReadScreen();
           }
         },

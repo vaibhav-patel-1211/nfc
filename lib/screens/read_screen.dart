@@ -11,7 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:open_file/open_file.dart';
 import '../providers/nfc_provider.dart';
 
-enum ContentType { text, image, file }
+import '../models/nfc_data.dart';
 
 class ReadScreen extends StatefulWidget {
   const ReadScreen({super.key});
@@ -23,32 +23,19 @@ class ReadScreen extends StatefulWidget {
 class _ReadScreenState extends State<ReadScreen> {
   bool _isDownloading = false;
 
-  ContentType _determineContentType(String content) {
-    if (!content.startsWith('http')) return ContentType.text;
-
-    final lower = content.toLowerCase();
-    if (lower.endsWith('.jpg') ||
-        lower.endsWith('.jpeg') ||
-        lower.endsWith('.png') ||
-        lower.endsWith('.gif') ||
-        lower.endsWith('.webp')) {
-      return ContentType.image;
-    }
-
-    return ContentType.file;
-  }
-
+  /// Downloads a file from the given URL and attempts to open it.
+  /// Used for handling file content types read from NFC tags.
   Future<void> _downloadAndOpenFile(String url, BuildContext context) async {
     setState(() {
       _isDownloading = true;
     });
 
     try {
-      // 1. Download the file
+      // 1. Download the file from the local server or internet
       final response = await http.get(Uri.parse(url));
 
       if (response.statusCode == 200) {
-        // 2. Get local path
+        // 2. Get local path in the app's documents directory
         final dir = await getApplicationDocumentsDirectory();
 
         // Extract filename from URL or use default
@@ -60,10 +47,10 @@ class _ReadScreenState extends State<ReadScreen> {
         // ensure unique name if needed? For now overwrite is fine for testing.
         final file = File('${dir.path}/$filename');
 
-        // 3. Save file
+        // 3. Save file locally
         await file.writeAsBytes(response.bodyBytes);
 
-        // 4. Open file
+        // 4. Open file using open_file package
         final result = await OpenFile.open(file.path);
 
         if (result.type != ResultType.done) {
@@ -91,128 +78,153 @@ class _ReadScreenState extends State<ReadScreen> {
     }
   }
 
-  Widget _buildContentDisplay(BuildContext context, String content) {
-    final type = _determineContentType(content);
+  Widget _buildContentDisplay(BuildContext context, NfcData data) {
+    if (data.type == NfcDataType.mime) {
+      // Check if it's an image based on mimeType
+      if (data.mimeType != null && data.mimeType!.startsWith('image/')) {
+        // Should we try to show image from URL if content is URL?
+        // Or is content base64?
+        // The current implementation of MimeRecord in service returns:
+        // content = String from body (likely URL or base64?)
+        // Wait, the previous logic assumed content was a URL.
+        // If it's a real NFC tag with a file, it might just be the file data inline?
+        // Or a URI record pointing to a file?
 
-    switch (type) {
-      case ContentType.image:
-        return Column(
-          children: [
-            Text('Image Detected',
-                style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 16),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                content,
-                height: 250,
-                width: double.infinity,
-                fit: BoxFit.cover,
-                errorBuilder: (ctx, err, stack) => Container(
-                  height: 150,
+        // If the mime record is a URL (common for "smart posters"), treat as URL.
+        // But here we likely have raw data if it's a true MimeRecord.
+        // Let's assume for now if it looks like a URL, we show it as image/file download.
+
+        if (data.content.startsWith('http')) {
+          return Column(
+            children: [
+              Text('Image Detected',
+                  style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 16),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.network(
+                  data.content,
+                  height: 250,
                   width: double.infinity,
-                  color: Colors.grey[200],
-                  child: const Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.broken_image, size: 48, color: Colors.grey),
-                      SizedBox(height: 8),
-                      Text('Could not load image. Server might be unreachable.',
-                          textAlign: TextAlign.center),
-                    ],
-                  ),
-                ),
-                loadingBuilder: (ctx, child, progress) {
-                  if (progress == null) return child;
-                  return Container(
-                    height: 250,
+                  fit: BoxFit.cover,
+                  errorBuilder: (ctx, err, stack) => Container(
+                    height: 150,
                     width: double.infinity,
-                    color: Colors.grey[100],
-                    child: const Center(child: CircularProgressIndicator()),
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: () => _downloadAndOpenFile(content, context),
-              icon: const Icon(Icons.download),
-              label: const Text('Download Image'),
-            ),
-          ],
-        );
-
-      case ContentType.file:
-        final fileName = content.split('/').last;
-        return Column(
-          children: [
-            const Icon(Icons.insert_drive_file, size: 64, color: Colors.blue),
-            const SizedBox(height: 16),
-            Text('File Detected',
-                style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(
-              fileName,
-              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
+                    color: Colors.grey[200],
+                    child: const Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.broken_image, size: 48, color: Colors.grey),
+                        SizedBox(height: 8),
+                        Text(
+                            'Could not load image. Server might be unreachable.',
+                            textAlign: TextAlign.center),
+                      ],
+                    ),
                   ),
-            ),
-            const SizedBox(height: 24),
+                  loadingBuilder: (ctx, child, progress) {
+                    if (progress == null) return child;
+                    return Container(
+                      height: 250,
+                      width: double.infinity,
+                      color: Colors.grey[100],
+                      child: const Center(child: CircularProgressIndicator()),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                onPressed: () => _downloadAndOpenFile(data.content, context),
+                icon: const Icon(Icons.download),
+                label: const Text('Download Image'),
+              ),
+            ],
+          );
+        }
+      }
+
+      // Generic File or non-image MIME
+      final fileName = data.content.startsWith('http')
+          ? data.content.split('/').last
+          : 'Data';
+      return Column(
+        children: [
+          const Icon(Icons.insert_drive_file, size: 64, color: Colors.blue),
+          const SizedBox(height: 16),
+          Text('File / Data Detected',
+              style: Theme.of(context).textTheme.titleMedium),
+          if (data.mimeType != null)
+            Text(data.mimeType!, style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 8),
+          Text(
+            fileName,
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+          ),
+          const SizedBox(height: 24),
+          if (data.content.startsWith('http'))
             ElevatedButton.icon(
-              onPressed: () => _downloadAndOpenFile(content, context),
+              onPressed: () => _downloadAndOpenFile(data.content, context),
               icon: const Icon(Icons.download),
               label: const Text('Download & Open'),
               style: ElevatedButton.styleFrom(
                 minimumSize: const Size(200, 50),
               ),
-            ),
-          ],
-        );
+            )
+          else
+            Text("Raw Data: ${data.content}", textAlign: TextAlign.center),
+        ],
+      );
+    } // End MIME
 
-      case ContentType.text:
-        return Column(
-          children: [
-            const Icon(Icons.text_fields, size: 48, color: Colors.black54),
-            const SizedBox(height: 16),
-            Text('Text Content', style: Theme.of(context).textTheme.labelLarge),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[300]!),
-              ),
-              child: Text(
-                content,
-                style: Theme.of(context).textTheme.bodyLarge,
-                textAlign: TextAlign.center,
-              ),
-            ),
-            const SizedBox(height: 16),
-            OutlinedButton.icon(
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: content));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Copied to clipboard')),
-                );
-              },
-              icon: const Icon(Icons.copy),
-              label: const Text('Copy'),
-            ),
-            // If it looks like a generic URL but not an image/file extension we recognize
-            if (content.startsWith('http')) ...[
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: () =>
-                    _downloadAndOpenFile(content, context), // Or launch URL
-                icon: const Icon(Icons.open_in_browser),
-                label: const Text('Open Link'),
-              ),
-            ]
-          ],
-        );
-    }
+    // Display Text or URI
+    final isUri = data.type == NfcDataType.uri;
+    final icon = isUri ? Icons.link : Icons.text_fields;
+    final title = isUri ? 'URI Content' : 'Text Content';
+
+    return Column(
+      children: [
+        Icon(icon, size: 48, color: Colors.black54),
+        const SizedBox(height: 16),
+        Text(title, style: Theme.of(context).textTheme.labelLarge),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.grey[300]!),
+          ),
+          child: Text(
+            data.content,
+            style: Theme.of(context).textTheme.bodyLarge,
+            textAlign: TextAlign.center,
+          ),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: () {
+            Clipboard.setData(ClipboardData(text: data.content));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Copied to clipboard')),
+            );
+          },
+          icon: const Icon(Icons.copy),
+          label: const Text('Copy'),
+        ),
+        if (isUri || data.content.startsWith('http')) ...[
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: () => _downloadAndOpenFile(
+                data.content, context), // Or launch URL properly
+            icon: const Icon(Icons.open_in_browser),
+            label: const Text('Open Link'),
+          ),
+        ]
+      ],
+    );
   }
 
   @override

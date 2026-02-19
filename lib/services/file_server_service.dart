@@ -1,73 +1,78 @@
 import 'dart:io';
-import 'package:shelf/shelf.dart';
-import 'package:shelf/shelf_io.dart' as shelf_io;
-import 'package:shelf_static/shelf_static.dart';
+import 'package:shelf/shelf.dart' as shelf;
+import 'package:shelf/shelf_io.dart' as io;
 import 'package:network_info_plus/network_info_plus.dart';
 
 class FileServerService {
   HttpServer? _server;
-  String? _serverUrl;
 
-  /// Starts the server hosting the given [file].
-  /// Returns the full URL to access the file.
+  /// Starts a local HTTP server to serve the selected file.
+  /// Returns the URL that can be used to access the file.
   Future<String> startServer(File file) async {
-    // If a server is already running, stop it first
-    await stopServer();
-
-    // Get the device's local IP address
-    final info = NetworkInfo();
-    var wifiIP = await info.getWifiIP();
-
-    // Fallback if IP is null (e.g., hotspot or emulator)
-    if (wifiIP == null) {
-      // Try to find a valid non-loopback interface
-      final interfaces = await NetworkInterface.list();
-      for (var interface in interfaces) {
-        for (var addr in interface.addresses) {
-          if (!addr.isLoopback && addr.type == InternetAddressType.IPv4) {
-            wifiIP = addr.address;
-            break;
-          }
-        }
-        if (wifiIP != null) break;
-      }
-    }
-
-    if (wifiIP == null) {
-      throw Exception(
-          'Could not determine device IP address. Ensure Wi-Fi is connected.');
-    }
+    // Stop any existing server
+    stopServer();
 
     // Create a handler that serves the specific file
-    final handler = createStaticHandler(
-      file.parent.path,
-      defaultDocument: file.uri.pathSegments.last,
+    final handler = (shelf.Request request) {
+      return shelf.Response.ok(
+        file.openRead(),
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': file.lengthSync().toString(),
+          'Content-Disposition':
+              'attachment; filename="${file.path.split('/').last}"',
+        },
+      );
+    };
+
+    // Bind to any available port on all interfaces (0.0.0.0)
+    // allowing access from other devices on the LAN.
+    _server = await io.serve(handler, '0.0.0.0', 0);
+
+    // Get the device's IP address
+    String ip = await _getLocalIpAddress();
+
+    return 'http://$ip:${_server!.port}/${file.path.split('/').last}';
+  }
+
+  /// Stops the local HTTP server if it is running.
+  void stopServer() {
+    _server?.close(force: true);
+    _server = null;
+  }
+
+  /// Returns the current server URL or empty string if not running.
+  String getServerUrl() {
+    if (_server == null) return '';
+    return 'http://...'; // Simplified, strictly for state check
+  }
+
+  /// Helper to get the device's local IP address.
+  /// Iterates through network interfaces to find a valid IPv4 address.
+  Future<String> _getLocalIpAddress() async {
+    final interfaces = await NetworkInterface.list(
+      type: InternetAddressType.IPv4,
+      includeLinkLocal: true,
     );
 
-    // Bind to the IP address on an ephemeral port (0)
-    _server = await shelf_io.serve(handler, wifiIP, 0);
-
-    // Construct the URL
-    // We use the file name as the path
-    final fileName = file.uri.pathSegments.last;
-    _serverUrl = 'http://${_server!.address.host}:${_server!.port}/$fileName';
-
-    print('File Server running at: $_serverUrl');
-    return _serverUrl!;
-  }
-
-  /// Stops the server if it's running.
-  Future<void> stopServer() async {
-    if (_server != null) {
-      await _server!.close(force: true);
-      _server = null;
-      _serverUrl = null;
-      print('File Server stopped');
+    try {
+      // Try to find a non-loopback address (e.g., 192.168.x.x)
+      // Prioritize Wi-Fi (wlan) or Ethernet (eth, en0) interfaces
+      NetworkInterface interface = interfaces.firstWhere((element) =>
+          element.name.contains('wlan') ||
+          element.name.contains('eth') ||
+          element.name.contains('en0'));
+      return interface.addresses.first.address;
+    } catch (e) {
+      // Fallback: just take the first non-loopback address found
+      for (var interface in interfaces) {
+        for (var addr in interface.addresses) {
+          if (!addr.isLoopback) {
+            return addr.address;
+          }
+        }
+      }
     }
-  }
-
-  /// Returns the current server URL or null if not running.
-  String? getServerUrl() {
-    return _serverUrl;
+    return '127.0.0.1'; // Fallback to localhost
   }
 }

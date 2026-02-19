@@ -10,3 +10,4 @@ bool get isAndroid => !kIsWeb && Platform.isAndroid;
 
 /// Returns true if the current platform is iOS
 bool get isIOS => !kIsWeb && Platform.isIOS;
+

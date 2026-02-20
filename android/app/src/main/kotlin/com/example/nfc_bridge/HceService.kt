@@ -26,7 +26,8 @@ class HceService : HostApduService() {
         // Capability Container (CC) File
         // MLe (Max R-APDU size): 00FF (255 bytes)
         // Max NDEF Size: 0400 (1024 bytes) - Reduced from FFFE to support old devices
-        private val CC_FILE = hexStringToByteArray("000F2000FF00FF0406E10404000000")
+        // Write Access: FF (Read Only) to prevent reader OS from attempting writes and aborting
+        private val CC_FILE = hexStringToByteArray("000F2000FF00FF0406E104040000FF")
 
         var broadcastText: String = "Hello from Android NFC Bridge"
             set(value) {
@@ -53,58 +54,21 @@ class HceService : HostApduService() {
         private fun updateCachedNdefMessage() {
             try {
                 val text = broadcastText
-                val isUri = text.startsWith("http://") || text.startsWith("https://")
 
-                val ndefRecord: ByteArray
-                val type: Byte
+                // We broadcast everything as a custom MIME type to prevent Android from opening the browser
+                val mimeType = "application/vnd.nfcbridge"
+                val typeBytes = mimeType.toByteArray(Charsets.US_ASCII)
+                val payloadBytes = text.toByteArray(Charsets.UTF_8)
 
-                if (isUri) {
-                    type = 0x55.toByte() // 'U'
-                    val uriPrefixCode: Byte
-                    val uriBody: String
-
-                    if (text.startsWith("https://www.")) {
-                        uriPrefixCode = 0x02.toByte()
-                        uriBody = text.substring(12)
-                    } else if (text.startsWith("http://www.")) {
-                        uriPrefixCode = 0x01.toByte()
-                        uriBody = text.substring(11)
-                    } else if (text.startsWith("https://")) {
-                        uriPrefixCode = 0x04.toByte()
-                        uriBody = text.substring(8)
-                    } else {
-                        uriPrefixCode = 0x03.toByte()
-                        uriBody = text.substring(7)
-                    }
-
-                    val uriBytes = uriBody.toByteArray(Charsets.UTF_8)
-                    val payload = ByteArray(1 + uriBytes.size)
-                    payload[0] = uriPrefixCode
-                    System.arraycopy(uriBytes, 0, payload, 1, uriBytes.size)
-                    ndefRecord = payload
-                } else {
-                    // Text Record
-                    type = 0x54.toByte() // 'T'
-                    val lang = "en".toByteArray(Charsets.US_ASCII)
-                    val textBytes = text.toByteArray(Charsets.UTF_8)
-                    val langLen = lang.size
-                    val statusByte = (langLen and 0x3F).toByte() // UTF-8, len=2
-
-                    val payload = ByteArray(1 + langLen + textBytes.size)
-                    payload[0] = statusByte
-                    System.arraycopy(lang, 0, payload, 1, langLen)
-                    System.arraycopy(textBytes, 0, payload, 1 + langLen, textBytes.size)
-                    ndefRecord = payload
-                }
-
-                val payloadLen = ndefRecord.size
+                val typeLen = typeBytes.size
+                val payloadLen = payloadBytes.size
                 val isShortRecord = payloadLen <= 255
 
-                // Header: MB=1, ME=1, CF=0, SR=?, IL=0, TNF=01
-                val headerByte = if (isShortRecord) 0xD1 else 0xC1
+                // Header: MB=1, ME=1, CF=0, SR=?, IL=0, TNF=2 (MIME Media)
+                val headerByte = if (isShortRecord) 0xD2 else 0xC2
 
-                // Record Overhead: Header(1) + TypeLen(1) + PayloadLen(1 or 4) + Type(1)
-                val recordOverhead = 1 + 1 + (if (isShortRecord) 1 else 4) + 1
+                // Record Overhead: Header(1) + TypeLen(1) + PayloadLen(1 or 4) + TypeBytes
+                val recordOverhead = 1 + 1 + (if (isShortRecord) 1 else 4) + typeLen
                 val totalLen = recordOverhead + payloadLen
 
                 // NDEF File: [Length (2 bytes)] + [NDEF Message]
@@ -116,7 +80,7 @@ class HceService : HostApduService() {
 
                 var idx = 2
                 fileContent[idx++] = headerByte.toByte()
-                fileContent[idx++] = 0x01.toByte() // Type Length
+                fileContent[idx++] = typeLen.toByte()
 
                 if (isShortRecord) {
                     fileContent[idx++] = payloadLen.toByte()
@@ -127,9 +91,12 @@ class HceService : HostApduService() {
                     fileContent[idx++] = (payloadLen and 0xFF).toByte()
                 }
 
-                fileContent[idx++] = type // 'T' or 'U'
+                // Append Type (MIME string)
+                System.arraycopy(typeBytes, 0, fileContent, idx, typeLen)
+                idx += typeLen
 
-                System.arraycopy(ndefRecord, 0, fileContent, idx, payloadLen)
+                // Append Payload
+                System.arraycopy(payloadBytes, 0, fileContent, idx, payloadLen)
 
                 cachedNdefMessage = fileContent
 
@@ -223,15 +190,6 @@ class HceService : HostApduService() {
         // Append Status Words (90 00)
         response[lenToRead] = 0x90.toByte()
         response[lenToRead + 1] = 0x00.toByte()
-
-        if (offset == 0 && Arrays.equals(selectedFile, NDEF_FILE_ID)) {
-             val v = getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator?
-             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                 v?.vibrate(android.os.VibrationEffect.createOneShot(50, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
-             } else {
-                 v?.vibrate(50)
-             }
-        }
 
         return response
     }

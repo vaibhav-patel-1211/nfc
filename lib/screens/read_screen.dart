@@ -2,17 +2,11 @@
 /// Part of the nfc_bridge project.
 /// Platform: iOS and Android
 
-import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:http/http.dart' as http;
-import 'package:path_provider/path_provider.dart';
-import 'package:open_file/open_file.dart';
 import '../providers/nfc_provider.dart';
-
 import '../models/nfc_data.dart';
-import '../utils/video_player_widget.dart';
 
 class ReadScreen extends StatefulWidget {
   const ReadScreen({super.key});
@@ -22,177 +16,22 @@ class ReadScreen extends StatefulWidget {
 }
 
 class _ReadScreenState extends State<ReadScreen> {
-  bool _isDownloading = false;
+  Widget _buildContentDisplay(BuildContext context, NfcData data) {
+    // Unwrap our custom MIME type to behave normally downstream
+    var displayType = data.type;
 
-  /// Downloads a file from the given URL and attempts to open it.
-  /// Used for handling file content types read from NFC tags.
-  Future<void> _downloadAndOpenFile(String url, BuildContext context) async {
-    setState(() {
-      _isDownloading = true;
-    });
-
-    try {
-      // 1. Download the file from the local server or internet
-      final response = await http.get(Uri.parse(url));
-
-      if (response.statusCode == 200) {
-        // 2. Get local path in the app's documents directory
-        final dir = await getApplicationDocumentsDirectory();
-
-        // Extract filename from URL or use default
-        String filename = url.split('/').last;
-        if (filename.isEmpty || !filename.contains('.')) {
-          filename = 'downloaded_file';
-        }
-
-        // ensure unique name if needed? For now overwrite is fine for testing.
-        final file = File('${dir.path}/$filename');
-
-        // 3. Save file locally
-        await file.writeAsBytes(response.bodyBytes);
-
-        // 4. Open file using open_file package
-        final result = await OpenFile.open(file.path);
-
-        if (result.type != ResultType.done) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Could not open file: ${result.message}')),
-            );
-          }
-        }
+    if (data.type == NfcDataType.mime &&
+        data.mimeType?.toLowerCase().trim() == 'application/vnd.nfcbridge') {
+      if (data.content.startsWith('http://') ||
+          data.content.startsWith('https://')) {
+        displayType = NfcDataType.uri;
       } else {
-        throw Exception('Server returned ${response.statusCode}');
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Download failed: $e')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isDownloading = false;
-        });
+        displayType = NfcDataType.text;
       }
     }
-  }
-
-  Widget _buildContentDisplay(BuildContext context, NfcData data) {
-    if (data.type == NfcDataType.mime) {
-      final mimeType = data.mimeType?.toLowerCase() ?? '';
-
-      // 1. Handle Images
-      if (mimeType.startsWith('image/')) {
-        if (data.content.startsWith('http')) {
-          return Column(
-            children: [
-              Text('Image Detected',
-                  style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 16),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Image.network(
-                  data.content,
-                  height: 250,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  errorBuilder: (ctx, err, stack) => Container(
-                    height: 150,
-                    width: double.infinity,
-                    color: Colors.grey[200],
-                    child: const Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.broken_image, size: 48, color: Colors.grey),
-                        SizedBox(height: 8),
-                        Text(
-                            'Could not load image. Server might be unreachable.',
-                            textAlign: TextAlign.center),
-                      ],
-                    ),
-                  ),
-                  loadingBuilder: (ctx, child, progress) {
-                    if (progress == null) return child;
-                    return Container(
-                      height: 250,
-                      width: double.infinity,
-                      color: Colors.grey[100],
-                      child: const Center(child: CircularProgressIndicator()),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                onPressed: () => _downloadAndOpenFile(data.content, context),
-                icon: const Icon(Icons.download),
-                label: const Text('Download Image'),
-              ),
-            ],
-          );
-        }
-      }
-
-      // 2. Handle Videos
-      if (mimeType.startsWith('video/') && data.content.startsWith('http')) {
-        return Column(
-          children: [
-            Text('Video Detected',
-                style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 16),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: VideoPlayerWidget(videoUrl: data.content),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: () => _downloadAndOpenFile(data.content, context),
-              icon: const Icon(Icons.download),
-              label: const Text('Download Video'),
-            ),
-          ],
-        );
-      }
-
-      // 3. Generic File or other MIME
-      final fileName = data.content.startsWith('http')
-          ? data.content.split('/').last
-          : 'Data';
-      return Column(
-        children: [
-          const Icon(Icons.insert_drive_file, size: 64, color: Colors.blue),
-          const SizedBox(height: 16),
-          Text('File / Data Detected',
-              style: Theme.of(context).textTheme.titleMedium),
-          if (data.mimeType != null)
-            Text(data.mimeType!, style: Theme.of(context).textTheme.bodySmall),
-          const SizedBox(height: 8),
-          Text(
-            fileName,
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
-          ),
-          const SizedBox(height: 24),
-          if (data.content.startsWith('http'))
-            ElevatedButton.icon(
-              onPressed: () => _downloadAndOpenFile(data.content, context),
-              icon: const Icon(Icons.download),
-              label: const Text('Download & Open'),
-              style: ElevatedButton.styleFrom(
-                minimumSize: const Size(200, 50),
-              ),
-            )
-          else
-            Text("Raw Data: ${data.content}", textAlign: TextAlign.center),
-        ],
-      );
-    } // End MIME
 
     // Display Text or URI
-    final isUri = data.type == NfcDataType.uri;
+    final isUri = displayType == NfcDataType.uri;
     final icon = isUri ? Icons.link : Icons.text_fields;
     final title = isUri ? 'URI Content' : 'Text Content';
 
@@ -226,15 +65,6 @@ class _ReadScreenState extends State<ReadScreen> {
           icon: const Icon(Icons.copy),
           label: const Text('Copy'),
         ),
-        if (isUri || data.content.startsWith('http')) ...[
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: () => _downloadAndOpenFile(
-                data.content, context), // Or launch URL properly
-            icon: const Icon(Icons.open_in_browser),
-            label: const Text('Open Link'),
-          ),
-        ]
       ],
     );
   }
@@ -253,7 +83,7 @@ class _ReadScreenState extends State<ReadScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   // Scan button
-                  if (!provider.isReading && !_isDownloading)
+                  if (!provider.isReading)
                     SizedBox(
                       width: 220,
                       height: 56,
@@ -276,20 +106,10 @@ class _ReadScreenState extends State<ReadScreen> {
                         SizedBox(height: 16),
                         Text('Hold device near NFC tag...'),
                       ],
-                    )
-                  else if (_isDownloading)
-                    const Column(
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text('Downloading content...'),
-                      ],
                     ),
 
                   // Content Display
-                  if (lastRead != null &&
-                      !provider.isReading &&
-                      !_isDownloading)
+                  if (lastRead != null && !provider.isReading)
                     Card(
                       elevation: 4,
                       shape: RoundedRectangleBorder(

@@ -1,9 +1,7 @@
 /// [nfc_service.dart] — Handles all NFC hardware interactions.
 /// Part of the nfc_bridge project.
-/// Platform: iOS and Android
-/// Depends on: flutter_nfc_kit, ndef, dart:io
-
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
 import 'package:ndef/ndef.dart' as ndef;
@@ -29,8 +27,26 @@ class NfcService {
         throw Exception('No NDEF records found on tag');
       }
 
-      // Get the first record
-      final record = records.first;
+      // Prioritize Text records first, then MIME, then fallback to whatever is first.
+      ndef.NDEFRecord? selectedRecord;
+      for (var r in records) {
+        if (r is ndef.TextRecord) {
+          selectedRecord = r;
+          break; // Text has highest priority
+        }
+      }
+
+      if (selectedRecord == null) {
+        for (var r in records) {
+          if (r is ndef.MimeRecord) {
+            selectedRecord = r;
+            break; // Custom MIME records are secondary priority
+          }
+        }
+      }
+
+      // Fallback to the first record if our priorities weren't found
+      final record = selectedRecord ?? records.first;
 
       // Parse based on record type
       if (record is ndef.TextRecord) {
@@ -44,12 +60,23 @@ class NfcService {
           content: record.uri.toString(),
         );
       } else if (record is ndef.MimeRecord) {
-        // Try to decode as text if it's json/xml/text, else just return info
         String content = "Binary Data";
-        try {
-          content = String.fromCharCodes(record.payload ?? []);
-        } catch (_) {
-          content = "Binary Data (${record.payload?.length ?? 0} bytes)";
+
+        // Explicitly decode our custom MIME type as a UTF-8 string,
+        // since iOS CoreNFC occasionally struggles with generic extraction.
+        if (record.decodedType == 'application/vnd.nfcbridge' &&
+            record.payload != null) {
+          try {
+            content = utf8.decode(record.payload!);
+          } catch (_) {
+            content = String.fromCharCodes(record.payload!);
+          }
+        } else {
+          try {
+            content = utf8.decode(record.payload ?? []);
+          } catch (_) {
+            content = "Binary Data (${record.payload?.length ?? 0} bytes)";
+          }
         }
 
         return NfcData(
@@ -73,12 +100,25 @@ class NfcService {
         );
       }
     } on PlatformException catch (e) {
+      if (e.message != null && e.message!.contains('NDEF not supported')) {
+        throw Exception(
+            'This NFC tag is empty, unformatted, or not NDEF compatible.');
+      }
       throw Exception(e.message ?? 'Failed to read NFC tag');
     } catch (e) {
+      if (e.toString().contains('NDEF not supported')) {
+        throw Exception(
+            'This NFC tag is empty, unformatted, or not NDEF compatible.');
+      }
       throw Exception('Failed to read NFC tag: $e');
     } finally {
       // Always finish the session to release the NFC controller
-      await FlutterNfcKit.finish(iosAlertMessage: "Finished");
+      try {
+        await FlutterNfcKit.finish(iosAlertMessage: "Finished");
+      } catch (e) {
+        // Ignore errors during finish, such as MissingPluginException on some Android setups
+        print('Ignored error finishing NFC session: $e');
+      }
     }
   }
 

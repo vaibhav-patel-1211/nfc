@@ -4,9 +4,11 @@
 
 ## Features
 
--   **Cross-Platform NFC Reading:** Read NDEF formatted tags on both iOS and Android.
--   **Android HCE Broadcasting:** Emulate an NFC tag on Android to broadcast data to other devices.
--   **Modern Implementation:** Uses `flutter_nfc_kit` and native platform integrations, avoiding deprecated APIs like Android Beam.
+-   **Cross-Platform NFC Reading:** Read NDEF formatted tags seamlessly on both iOS and Android.
+-   **Android HCE Broadcasting:** Emulate an NFC tag on Android to securely broadcast text and URLs to other devices.
+-   **Custom MIME Security:** Intercepts automatic Android browser pop-ups by wrapping data in a custom `application/vnd.nfcbridge` format, keeping the workflow strictly inside the app.
+-   **iOS Compatibility:** Enforces true UTF-8 decoding on iOS CoreNFC to perfectly parse custom MIME records and strings from Android emitters.
+-   **Modern Implementation:** Uses `flutter_nfc_kit` and native platform integrations.
 
 ---
 
@@ -219,14 +221,13 @@ flutter run -d <device_id>
 
 ### Reading NFC Tags (iOS & Android)
 1.  Tap **Scan Tag** on the app screen.
-2.  Hold your device near an NDEF-formatted NFC tag.
-3.  The text content of the tag will be displayed.
+2.  Hold your device near an NDEF-formatted NFC tag (or an Android device in Broadcast mode).
+3.  The app will instantly display the raw string or URL on the screen. It intentionally prevents external automatic browser redirects.
 
 ### Broadcasting (Android Only)
-1.  Toggle the switch to **Broadcast** mode.
-2.  Tap **Start Broadcasting**.
-3.  The app will emulate an NFC tag.
-4.  Touch another NFC-enabled device to this device to transmit the data.
+1.  Enter the text or URL you wish to share into the input field.
+2.  Tap **Start Broadcasting**. The device is now acting as an NFC Tag.
+3.  Touch another NFC-enabled device (iOS or Android) to the back of this device to instantly transmit the string.
 
 ---
 
@@ -236,5 +237,16 @@ flutter run -d <device_id>
 -   **Broadcasting not working**: Ensure the receiving device supports reading the proprietary AID configured (`D2760000850101`).
 -   **Empty Scan Result**: Ensure the tag is NDEF formatted and contains a text record.
 -   **Screen Off**: Some Android devices disable HCE when the screen is off. Keep the device unlocked and screen on.
+
+---
+
+## CI/CD Pipeline
+
+This project is configured for **Codemagic** to automate builds.
+
+-   **Config File**: `codemagic.yaml`
+-   **Workflows**:
+    -   `ios-workflow`: Builds the iOS app (Release mode, unsigned).
+-   **Artifacts**: Generates `.app` bundles for iOS.
 
 ---

@@ -5,7 +5,6 @@
 /// IMPORTANT: This screen must never be shown on iOS.
 /// iOS does not support NFC tag emulation.
 
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/nfc_provider.dart';
@@ -42,61 +41,6 @@ class _BroadcastScreenState extends State<BroadcastScreen>
     super.dispose();
   }
 
-  /// Builds the preview widget for the selected file
-  Widget _buildFilePreview(BuildContext context, NfcProvider provider) {
-    if (provider.selectedFile == null) return const SizedBox.shrink();
-
-    final file = provider.selectedFile!;
-    final fileName = provider.selectedFileName ?? 'Unknown File';
-    final extension = fileName.split('.').last.toLowerCase();
-
-    final isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].contains(extension);
-
-    if (isImage) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Image.file(
-          file,
-          height: 150,
-          width: double.infinity,
-          fit: BoxFit.cover,
-          errorBuilder: (ctx, _, __) => _buildGenericFileIcon(fileName),
-        ),
-      );
-    } else {
-      return _buildGenericFileIcon(fileName);
-    }
-  }
-
-  Widget _buildGenericFileIcon(String fileName) {
-    return Container(
-      height: 150,
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: Colors.grey[200],
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[300]!),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.insert_drive_file, size: 48, color: Colors.grey),
-          const SizedBox(height: 8),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8.0),
-            child: Text(
-              fileName,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Consumer<NfcProvider>(
@@ -125,13 +69,6 @@ class _BroadcastScreenState extends State<BroadcastScreen>
                           ),
                           const SizedBox(height: 16),
 
-                          // File / Image Preview
-                          if (provider.selectedFile != null)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 16.0),
-                              child: _buildFilePreview(context, provider),
-                            ),
-
                           // If broadcasting, show the static text being broadcasted
                           if (provider.isBroadcasting)
                             Text(
@@ -146,35 +83,14 @@ class _BroadcastScreenState extends State<BroadcastScreen>
                                 // --- Text Input ---
                                 TextField(
                                   controller: _textController,
-                                  decoration: InputDecoration(
+                                  decoration: const InputDecoration(
                                     hintText: 'Enter text or URL',
-                                    border: const OutlineInputBorder(),
-                                    suffixIcon: provider.selectedFile != null
-                                        ? IconButton(
-                                            icon: const Icon(Icons.close),
-                                            onPressed: () {
-                                              provider.setBroadcastText('');
-                                              _textController.clear();
-                                            },
-                                          )
-                                        : null,
+                                    border: OutlineInputBorder(),
                                   ),
                                   textAlign: TextAlign.center,
                                   onChanged: (value) {
                                     provider.setBroadcastText(value);
                                   },
-                                ),
-                                const SizedBox(height: 12),
-                                // --- File Picker Button ---
-                                OutlinedButton.icon(
-                                  onPressed: () async {
-                                    await provider.pickFile();
-                                    // Update controller with new URL
-                                    _textController.text =
-                                        provider.broadcastText;
-                                  },
-                                  icon: const Icon(Icons.attach_file),
-                                  label: const Text('Pick File'),
                                 ),
                               ],
                             ),

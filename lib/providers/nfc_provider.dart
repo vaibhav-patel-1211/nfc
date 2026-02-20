@@ -3,38 +3,24 @@
 /// Platform: iOS and Android
 /// Depends on: provider, NfcService, AppMode
 
-import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:permission_handler/permission_handler.dart';
 import '../services/nfc_service.dart';
-import '../services/file_server_service.dart';
 import '../models/app_mode.dart';
 import '../models/nfc_data.dart';
 
 class NfcProvider extends ChangeNotifier {
   final NfcService _nfcService = NfcService();
-  final FileServerService _fileServer = FileServerService();
-
   NfcData? lastRead; // last successfully read tag data
   String? errorMessage; // last error, null when no error
   bool isReading = false; // true while a scan is in progress
   bool isBroadcasting = false; // true while HCE is active
   AppMode mode = AppMode.read; // current operating mode
-  File? selectedFile; // Currently selected file for broadcast
-  String? selectedFileName; // Name of the selected file for UI display
 
   static const String kDefaultBroadcastText = 'https://flutter.dev';
   String broadcastText = kDefaultBroadcastText;
 
   /// Updates the text to be broadcasted
   void setBroadcastText(String text) {
-    // If text is changed manually, clear the file server
-    if (selectedFile != null && text != _fileServer.getServerUrl()) {
-      _fileServer.stopServer();
-      selectedFile = null;
-      selectedFileName = null;
-    }
     broadcastText = text;
     notifyListeners();
   }
@@ -105,39 +91,6 @@ class NfcProvider extends ChangeNotifier {
       errorMessage = e.toString().replaceFirst('Exception: ', '');
     } finally {
       isBroadcasting = false;
-      notifyListeners();
-    }
-  }
-
-  /// Picking a file and starting the server.
-  /// Launches a file picker, starts a local HTTP server, and updates the broadcast text to the file's URL.
-  Future<void> pickFile() async {
-    try {
-      // Request location permission (required for IP address on Android 12+)
-      if (Platform.isAndroid) {
-        await Permission.location.request();
-      }
-
-      // Pick any file type
-      FilePickerResult? result = await FilePicker.platform.pickFiles();
-
-      if (result != null && result.files.single.path != null) {
-        selectedFile = File(result.files.single.path!);
-        selectedFileName = result.files.single.name;
-
-        // Start server and get URL
-        final url = await _fileServer.startServer(selectedFile!);
-
-        // Update broadcast text
-        broadcastText = url;
-        errorMessage = null;
-        notifyListeners();
-      }
-    } catch (e) {
-      errorMessage = "File Server Error: $e";
-      selectedFile = null;
-      selectedFileName = null;
-      _fileServer.stopServer();
       notifyListeners();
     }
   }

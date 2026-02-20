@@ -3,7 +3,7 @@
 /// Platform: iOS and Android
 
 import 'dart:io';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart'; 
 
 /// Returns true if the current platform is Android
 bool get isAndroid => !kIsWeb && Platform.isAndroid;

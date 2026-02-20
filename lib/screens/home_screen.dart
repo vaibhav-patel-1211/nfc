@@ -10,6 +10,7 @@ import '../models/app_mode.dart';
 import '../utils/platform_utils.dart';
 import 'read_screen.dart';
 import 'broadcast_screen.dart';
+import '../features/media_transfer/media_transfer_screen.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -19,6 +20,20 @@ class HomeScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('NFC Bridge'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.share),
+            tooltip: 'Media Transfer',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const MediaTransferScreen(),
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: Consumer<NfcProvider>(
         builder: (context, provider, child) {

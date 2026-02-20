@@ -47,6 +47,12 @@
 	<true/>
 	<key>NFCReaderUsageDescription</key>
 	<string>NFC Bridge reads NFC tags to display their text content.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>We need access to the photo library to save fetched media files.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>We need access to the photo library to save fetched media files.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>We need access to the local network to transfer media files natively between nearby devices.</string>
 	<!--
 	  Restricts CoreNFC session to NDEF format only.
 	  Required alongside the entitlement for iOS 13+.

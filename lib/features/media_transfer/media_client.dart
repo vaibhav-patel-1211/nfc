@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
-import 'package:gallery_saver/gallery_saver.dart';
+import 'package:gal/gal.dart';
 
 class MediaClient {
   Future<Map<String, dynamic>> fetchInfo(String fileUrl) async {
@@ -49,19 +49,25 @@ class MediaClient {
     await sink.close();
     client.close();
 
-    // Determine type and use gallery_saver if appropriate
+    // Determine type and use gal if appropriate
     final lowerName = filename.toLowerCase();
     bool savedToGallery = false;
 
-    if (lowerName.endsWith('.jpg') ||
-        lowerName.endsWith('.jpeg') ||
-        lowerName.endsWith('.png') ||
-        lowerName.endsWith('.gif')) {
-      savedToGallery = await GallerySaver.saveImage(savePath) ?? false;
-    } else if (lowerName.endsWith('.mp4') ||
-        lowerName.endsWith('.mov') ||
-        lowerName.endsWith('.avi')) {
-      savedToGallery = await GallerySaver.saveVideo(savePath) ?? false;
+    try {
+      if (lowerName.endsWith('.jpg') ||
+          lowerName.endsWith('.jpeg') ||
+          lowerName.endsWith('.png') ||
+          lowerName.endsWith('.gif')) {
+        await Gal.putImage(savePath);
+        savedToGallery = true;
+      } else if (lowerName.endsWith('.mp4') ||
+          lowerName.endsWith('.mov') ||
+          lowerName.endsWith('.avi')) {
+        await Gal.putVideo(savePath);
+        savedToGallery = true;
+      }
+    } catch (e) {
+      savedToGallery = false;
     }
 
     if (savedToGallery) {
